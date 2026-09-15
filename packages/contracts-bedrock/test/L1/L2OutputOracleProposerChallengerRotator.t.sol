@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
-import {CommonTest} from "test/setup/CommonTest.sol";
-import {EIP1967Helper} from "test/mocks/EIP1967Helper.sol";
-import {L2OutputOracle} from "src/L1/L2OutputOracle.sol";
-import {L2OutputOracleProposerChallengerRotator} from "src/L1/L2OutputOracleProposerChallengerRotator.sol";
-import {ProxyAdmin} from "src/universal/ProxyAdmin.sol";
-import {Vm} from "forge-std/Vm.sol";
+import { CommonTest } from "test/setup/CommonTest.sol";
+import { EIP1967Helper } from "test/mocks/EIP1967Helper.sol";
+import { L2OutputOracle } from "src/L1/L2OutputOracle.sol";
+import { L2OutputOracleProposerChallengerRotator } from "src/L1/L2OutputOracleProposerChallengerRotator.sol";
+import { ProxyAdmin } from "src/universal/ProxyAdmin.sol";
+import { Vm } from "forge-std/Vm.sol";
 
 contract L2OutputOracleProposerChallengerRotator_Test is CommonTest {
     L2OutputOracleProposerChallengerRotator internal rotator;
@@ -21,9 +21,10 @@ contract L2OutputOracleProposerChallengerRotator_Test is CommonTest {
         originalImplementation = EIP1967Helper.getImplementation(address(l2OutputOracle));
     }
 
-    function test_rotateProposerAndChallenger_onlyOldProposer_succeeds() external {
+    function test_rotateProposerAndChallenger_arbitraryCaller_succeeds() external {
         address oldProposer = l2OutputOracle.proposer();
         address oldChallenger = l2OutputOracle.challenger();
+        address arbitraryCaller = makeAddr("arbitraryCaller");
         address newProposer = makeAddr("newProposer");
         address newChallenger = makeAddr("newChallenger");
 
@@ -39,9 +40,9 @@ contract L2OutputOracleProposerChallengerRotator_Test is CommonTest {
         proxyAdmin.upgrade(payable(address(l2OutputOracle)), address(rotator));
 
         vm.recordLogs();
-        vm.prank(oldProposer);
+        vm.prank(arbitraryCaller);
         L2OutputOracleProposerChallengerRotator(address(l2OutputOracle))
-            .rotateProposerAndChallenger({_proposer: newProposer, _challenger: newChallenger});
+            .rotateProposerAndChallenger({ _proposer: newProposer, _challenger: newChallenger });
         Vm.Log[] memory entries = vm.getRecordedLogs();
 
         assertEq(entries.length, 1);
@@ -62,13 +63,6 @@ contract L2OutputOracleProposerChallengerRotator_Test is CommonTest {
         assertTrue(oldProposer != l2OutputOracle.proposer());
         assertTrue(oldChallenger != l2OutputOracle.challenger());
 
-        vm.prank(oldProposer);
-        vm.expectRevert("L2OutputOracle: only old proposer can rotate");
-        L2OutputOracleProposerChallengerRotator(address(l2OutputOracle))
-            .rotateProposerAndChallenger({
-                _proposer: makeAddr("secondProposer"), _challenger: makeAddr("secondChallenger")
-            });
-
         vm.prank(proxyAdmin.owner());
         proxyAdmin.upgrade(payable(address(l2OutputOracle)), originalImplementation);
 
@@ -77,30 +71,56 @@ contract L2OutputOracleProposerChallengerRotator_Test is CommonTest {
         assertEq(l2OutputOracle.challenger(), newChallenger);
     }
 
-    function test_rotateProposerAndChallenger_notOldProposer_reverts() external {
+    function test_rotateProposerAndChallenger_multipleArbitraryCallers_succeed() external {
         vm.prank(proxyAdmin.owner());
         proxyAdmin.upgrade(payable(address(l2OutputOracle)), address(rotator));
 
-        vm.prank(makeAddr("notOldProposer"));
-        vm.expectRevert("L2OutputOracle: only old proposer can rotate");
+        address firstProposer = makeAddr("firstProposer");
+        address firstChallenger = makeAddr("firstChallenger");
+        vm.prank(makeAddr("firstCaller"));
         L2OutputOracleProposerChallengerRotator(address(l2OutputOracle))
-            .rotateProposerAndChallenger({_proposer: makeAddr("newProposer"), _challenger: makeAddr("newChallenger")});
+            .rotateProposerAndChallenger({ _proposer: firstProposer, _challenger: firstChallenger });
+
+        assertEq(l2OutputOracle.proposer(), firstProposer);
+        assertEq(l2OutputOracle.challenger(), firstChallenger);
+
+        address secondProposer = makeAddr("secondProposer");
+        address secondChallenger = makeAddr("secondChallenger");
+        vm.prank(makeAddr("secondCaller"));
+        L2OutputOracleProposerChallengerRotator(address(l2OutputOracle))
+            .rotateProposerAndChallenger({ _proposer: secondProposer, _challenger: secondChallenger });
+
+        assertEq(l2OutputOracle.proposer(), secondProposer);
+        assertEq(l2OutputOracle.challenger(), secondChallenger);
     }
 
     function test_rotateProposerAndChallenger_zeroAddress_reverts() external {
-        address oldProposer = l2OutputOracle.proposer();
+        address arbitraryCaller = makeAddr("arbitraryCaller");
 
         vm.prank(proxyAdmin.owner());
         proxyAdmin.upgrade(payable(address(l2OutputOracle)), address(rotator));
 
-        vm.prank(oldProposer);
+        vm.prank(arbitraryCaller);
         vm.expectRevert("L2OutputOracle: proposer cannot be zero address");
         L2OutputOracleProposerChallengerRotator(address(l2OutputOracle))
-            .rotateProposerAndChallenger({_proposer: address(0), _challenger: makeAddr("newChallenger")});
+            .rotateProposerAndChallenger({ _proposer: address(0), _challenger: makeAddr("newChallenger") });
 
-        vm.prank(oldProposer);
+        vm.prank(arbitraryCaller);
         vm.expectRevert("L2OutputOracle: challenger cannot be zero address");
         L2OutputOracleProposerChallengerRotator(address(l2OutputOracle))
-            .rotateProposerAndChallenger({_proposer: makeAddr("newProposer"), _challenger: address(0)});
+            .rotateProposerAndChallenger({ _proposer: makeAddr("newProposer"), _challenger: address(0) });
+    }
+
+    function test_constructor_locksInitializer() external {
+        vm.expectRevert("Initializable: contract is already initialized");
+        rotator.initialize({
+            _submissionInterval: 1,
+            _l2BlockTime: 1,
+            _startingBlockNumber: 0,
+            _startingTimestamp: 0,
+            _proposer: makeAddr("proposer"),
+            _challenger: makeAddr("challenger"),
+            _finalizationPeriodSeconds: 1
+        });
     }
 }

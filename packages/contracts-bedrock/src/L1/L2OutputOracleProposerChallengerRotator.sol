@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.15;
 
-import {L2OutputOracle} from "src/L1/L2OutputOracle.sol";
+import { L2OutputOracle } from "src/L1/L2OutputOracle.sol";
 
 /// @custom:proxied
 /// @title L2OutputOracleProposerChallengerRotator
@@ -12,16 +12,12 @@ contract L2OutputOracleProposerChallengerRotator is L2OutputOracle {
         address oldProposer, address oldChallenger, address newProposer, address newChallenger
     );
 
-    /// @notice Allows only the proposer that is currently stored in the proxy to rotate roles.
-    modifier allowOldProposer() {
-        require(msg.sender == proposer, "L2OutputOracle: only old proposer can rotate");
-        _;
-    }
-
     /// @notice Rotates the proposer and challenger addresses.
+    /// @dev This function is intentionally permissionless. The implementation must only be exposed inside an atomic
+    ///      upgrade-call-restore batch controlled by the proxy admin.
     /// @param _proposer New proposer address.
     /// @param _challenger New challenger address.
-    function rotateProposerAndChallenger(address _proposer, address _challenger) public allowOldProposer {
+    function rotateProposerAndChallenger(address _proposer, address _challenger) external {
         require(_proposer != address(0), "L2OutputOracle: proposer cannot be zero address");
         require(_challenger != address(0), "L2OutputOracle: challenger cannot be zero address");
 
